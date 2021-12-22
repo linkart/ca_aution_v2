@@ -6,18 +6,17 @@ pragma abicoder v2; // solhint-disable-line
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-import "./mixins/SendValueWithFallbackWithdraw.sol";
-import "./mixins/NFTMarketFees.sol";
-import "./mixins/NFTMarketAuction.sol";
-import "./mixins/NFTMarketReserveAuction.sol";
-import "./interfaces/ICAAsset.sol";
+import "./aution/SendValueWithFallbackWithdraw.sol";
+import "./aution/NFTMarketFees.sol";
+import "./aution/NFTMarketAuction.sol";
+import "./aution/NFTMarketReserveAuction.sol";
 
 
 /**
  * @title A market for NFTs on CA.
  * @dev This top level file holds no data directly to ease future upgrades.
  */
-contract CANFTMarket is
+contract NFTAutionMarket is
   ReentrancyGuard,
   SendValueWithFallbackWithdraw,
   NFTMarketFees,
@@ -29,9 +28,8 @@ contract CANFTMarket is
    * @dev This farms the initialize call out to inherited contracts as needed.
    */
   constructor (IAccessControl access,
-    ICAAsset caAsset,
     address payable treasury)
-    NFTMarketFees(caAsset, treasury)
+    NFTMarketFees(treasury)
     NFTMarketReserveAuction(access) {
   }
 
@@ -43,13 +41,12 @@ contract CANFTMarket is
     uint32 minPercentIncrementInBasisPoints,
     uint32 duration,
     uint32 _caPoints,
-    uint32 _artistPoints,
     uint32 _sellerPoints,
     uint32 _auctionAwardPoints,
     uint32 _sharePoints
   ) public onlyCAAdmin(msg.sender) {
     _updateReserveAuctionConfig(minPercentIncrementInBasisPoints, duration);
-    _updateMarketFees(_caPoints, _artistPoints, _sellerPoints, _auctionAwardPoints, _sharePoints);
+    _updateMarketFees(_caPoints, _sellerPoints, _auctionAwardPoints, _sharePoints);
   }
 
   function adminUpdateWithdrawThreshold(uint256 _withdrawalThreshold) public onlyCAAdmin(msg.sender) {

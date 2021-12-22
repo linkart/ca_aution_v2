@@ -2,8 +2,6 @@
 
 pragma solidity ^0.8.0;
 
-
-import "../interfaces/ICAAsset.sol";
 import "./Constants.sol";
 import "./SendValueWithFallbackWithdraw.sol";
 
@@ -17,18 +15,14 @@ abstract contract NFTMarketFees is
 
   event MarketFeesUpdated(
     uint32 caPoints,
-    uint32 artistPoints,
     uint32 sellerPoints,
     uint32 auctionAwardPoints,
     uint32 sharePoints
   );
 
-  ICAAsset immutable caAsset;
   uint32 private caPoints;
   uint32 private sharePoints;
-  uint32 private artistPoints;
   uint32 private sellerPoints;
-
   uint32 private auctionAwardPoints;
   
   uint256 public withdrawThreshold;
@@ -47,17 +41,13 @@ abstract contract NFTMarketFees is
   /**
    * @dev Called once after the initial deployment to set the CART treasury address.
    */
-  constructor(
-    ICAAsset _caAsset,
-    address payable _treasury) {
+  constructor(address payable _treasury) {
     require(_treasury != address(0), "NFTMarketFees: Address not zero");
-    caAsset = _caAsset;
     treasury = _treasury;
 
     caPoints = 150;
     sharePoints = 100;
-    artistPoints = 1000;
-    sellerPoints = 8250;
+    sellerPoints = 9250;
     auctionAwardPoints = 500;
 
     withdrawThreshold = 0.1 ether;
@@ -83,38 +73,22 @@ abstract contract NFTMarketFees is
     return !nftContractToTokenIdToFirstSaleCompleted[tokenId];
   }
 
-  function getArtist(uint256 tokenId) public view returns (address artist) {
-      uint256 editionNumber = caAsset.editionOfTokenId(tokenId);
-      (artist,) = caAsset.artistCommission(editionNumber);
-  }
-
-
   /**
    * @notice Returns how funds will be distributed for a sale at the given price point.
    * @dev This could be used to present exact fee distributing on listing or before a bid is placed.
    */
-  function getFees(uint tokenId, uint256 price)
+  function getFees(uint256 price)
     public
     view
     returns (
       uint256 caFee,
-      uint256 artistFee,
       uint256 sellerFee,
       uint256 auctionFee,
       uint256 shareFee
     )
   {
     sellerFee = sellerPoints * price / BASIS_POINTS;
-    // 首次拍卖的时候，作家即卖家，联名者需参与分成
-    if (!nftContractToTokenIdToFirstSaleCompleted[tokenId]) {
-        caFee = (caPoints + artistPoints) * price / BASIS_POINTS;
-        artistFee = sellerFee;
-        sellerFee = 0;
-    } else {
-        caFee = caPoints * price / BASIS_POINTS;
-        artistFee = artistPoints * price / BASIS_POINTS;
-    }
-
+    caFee = caPoints * price / BASIS_POINTS;
     auctionFee = auctionAwardPoints * price / BASIS_POINTS;
     shareFee = sharePoints * price / BASIS_POINTS;
   }
@@ -141,13 +115,11 @@ abstract contract NFTMarketFees is
   /**
    * @dev Distributes funds to foundation, creator, and NFT owner after a sale.
    */
-  function _distributeFunds(
-    uint256 tokenId,
-    address seller,
+  function _distributeFunds(address seller,
     address shareUser,
     uint256 price
   ) internal {
-    (uint caFee, uint artistFee, uint sellerFee, ,uint shareFee) = getFees(tokenId, price);
+    (uint caFee, uint sellerFee, , uint shareFee) = getFees(price);
     
     if (shareUser == address(0)) {
       _sendValueWithFallbackWithdrawWithLowGasLimit(treasury, caFee + shareFee);
@@ -158,35 +130,7 @@ abstract contract NFTMarketFees is
       emit ShareAwardUpdated(shareUser, shareFee);
     }
 
-      uint256 editionNumber = caAsset.editionOfTokenId(tokenId);
-      (address artist, uint256 artistRate) = caAsset.artistCommission(editionNumber);
-      (uint256 optionalRate, address optionalRecipient) = caAsset.editionOptionalCommission(editionNumber);
-    
-      if (optionalRecipient == address(0)) { 
-        if (artist == seller) {
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(seller, artistFee + sellerFee);
-        } else {
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(seller, sellerFee);
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(artist, artistFee);
-        }
-      } else {
-        uint optionalFee = artistFee * optionalRate / (optionalRate + artistRate);
-        if (optionalFee > 0) {
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(optionalRecipient, optionalFee);
-        }
-
-        if (artist == seller) {
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(seller, artistFee + sellerFee - optionalFee);
-        } else {
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(seller, sellerFee);
-          _sendValueWithFallbackWithdrawWithMediumGasLimit(artist, artistFee - optionalFee);
-        }
-      }
-
-    // Anytime fees are distributed that indicates the first sale is complete,
-    // which will not change state during a secondary sale.
-    // This must come after the `getFees` call above as this state is considered in the function.
-    nftContractToTokenIdToFirstSaleCompleted[tokenId] = true;
+    _sendValueWithFallbackWithdrawWithMediumGasLimit(seller, sellerFee);
   }
 
 
@@ -200,9 +144,8 @@ abstract contract NFTMarketFees is
       uint32 ,
       uint32 ,
       uint32 ,
-      uint32 ,
       uint32) {
-    return (caPoints, artistPoints, sellerPoints, auctionAwardPoints, sharePoints);
+    return (caPoints, sellerPoints, auctionAwardPoints, sharePoints);
   }
 
   function _updateWithdrawThreshold(uint256 _withdrawalThreshold) internal {
@@ -214,22 +157,19 @@ abstract contract NFTMarketFees is
    */
   function _updateMarketFees(
     uint32 _caPoints,
-    uint32 _artistPoints,
     uint32 _sellerPoints,
     uint32 _auctionAwardPoints,
     uint32 _sharePoints
   ) internal {
-    require(_caPoints + _artistPoints + _sellerPoints + _auctionAwardPoints + _sharePoints < BASIS_POINTS, "NFTMarketFees: Fees >= 100%");
+    require(_caPoints + _sellerPoints + _auctionAwardPoints + _sharePoints < BASIS_POINTS, "NFTMarketFees: Fees >= 100%");
 
     caPoints = caPoints;
-    artistPoints = _artistPoints;
     sellerPoints = _sellerPoints;
     auctionAwardPoints = _auctionAwardPoints;
     sharePoints = _sharePoints;
 
     emit MarketFeesUpdated(
       _caPoints,
-      _artistPoints,
       _sellerPoints,
       _auctionAwardPoints,
       _sharePoints
